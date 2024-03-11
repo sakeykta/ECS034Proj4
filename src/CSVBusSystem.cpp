@@ -21,7 +21,7 @@ struct CCSVBusSystem::SImplementation{
         
         // Destructor
         ~SStop(){}
-        
+
         // Overrides base class method to return stop ID
         CBusSystem::TStopID ID() const noexcept override{
             return DID;
@@ -66,7 +66,7 @@ struct CCSVBusSystem::SImplementation{
         }
         
         // Method to add a stop ID to the route
-        void AddStopID(CBusSystem::TStopID &stop_id){
+        void AddStopID(CBusSystem::TStopID stop_id){
             // Check if the stop ID already exists in the vector
             if (std::find(DStopIDs.begin(), DStopIDs.end(), stop_id) == DStopIDs.end()) {
                 // If not found, add it to the vector
@@ -82,8 +82,11 @@ struct CCSVBusSystem::SImplementation{
     std::unordered_map<std::string, std::shared_ptr<SRoute>> DRouteNametoRoute; // Map of route names to route objects
     std::vector<std::shared_ptr<SRoute>> DRoutesByIndex; // Vector of route objects
 
+    std::shared_ptr<CDSVReader> DDataSource; // CSV data source for reading routes
+
     // Constructor
-    SImplementation(std::shared_ptr<CDSVReader> stopsrc, std::shared_ptr<CDSVReader> routesrc){
+    SImplementation(std::shared_ptr<CDSVReader> stopsrc, std::shared_ptr<CDSVReader> routesrc)
+        : DDataSource(routesrc) { // Initialize data source with routes CSV reader
         std::vector<std::string> stop_row;
         std::vector<std::string> route_row;
 
@@ -116,6 +119,9 @@ struct CCSVBusSystem::SImplementation{
                 search->second->AddStopID(stop_id); // Search already has the route we are looking for, add there
         }
     }
+
+    // Method to index routes
+    void IndexRoutes();
 
     // Method to get the number of stops
     std::size_t StopCount() const noexcept{
@@ -166,6 +172,31 @@ CCSVBusSystem::CCSVBusSystem(std::shared_ptr<CDSVReader> stopsrc, std::shared_pt
 // Destructor for CSV Bus System
 CCSVBusSystem::~CCSVBusSystem(){
     // Empty
+}
+
+// Method to index routes
+void CCSVBusSystem::SImplementation::IndexRoutes() {
+    std::vector<std::string> route_row;
+
+    // Read first row of the routes CSV file (contains headers)
+    DDataSource->ReadRow(route_row); // Assuming DDataSource is a member of CDSVReader containing route data
+
+    // Read routes from the CSV file
+    while (DDataSource->ReadRow(route_row)) {
+        std::string route_name = route_row[0]; // Route name
+        CBusSystem::TStopID stop_id = std::stoull(route_row[1]); // Stop ID
+
+        auto search = DRouteNametoRoute.find(route_name);
+        if (search == DRouteNametoRoute.end()) { // New route!
+            std::vector<CBusSystem::TStopID> stop_ids; // Create a new vector of Stop IDs
+            stop_ids.push_back(stop_id);
+            auto NewRoute = std::make_shared<SRoute>(route_name, stop_ids); // Create a new route object
+            DRoutesByIndex.push_back(NewRoute); // Add to the vector of routes
+            DRouteNametoRoute[route_name] = NewRoute; // Add to the route name to route object map
+        } else { // Add new stop to the existing route
+            search->second->AddStopID(stop_id); // The search already has the route we are looking for, add there
+        }
+    }
 }
 
 // Method to get the number of stops
