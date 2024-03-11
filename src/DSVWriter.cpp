@@ -44,21 +44,12 @@ bool CDSVWriter::WriteRow(const std::vector<std::string> &row) {
         if (i + 1 < row.size())
             oss << DImplementation->DDelimiter;
     }
+    
     // Append newline character after each row
     oss << '\n';
 
     std::string str = oss.str();
-    std::cout << "Row data after building: " << oss.str() << std::endl;
-    // Remove the newline character at the end if it exists
-    if (!str.empty() && str.back() == '\n') {
-        str.pop_back();
-    }
+    std::cout << "Row data after building: " << str << std::endl;
 
     return DImplementation->DDataSink->Write(std::vector<char>(str.begin(), str.end()));
 }
-
-
-
-
-
-
