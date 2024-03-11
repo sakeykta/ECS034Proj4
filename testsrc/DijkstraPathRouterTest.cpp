@@ -20,3 +20,15 @@ TEST(DijkstraPathRouter, RouteTest) {
     EXPECT_EQ(12.0, PathRouter.FindShortestPath(Vertices[2], Vertices[3], Route));
     EXPECT_EQ(Route, ExpectedRoute);
 }
+
+TEST(DijkstraPathRouter, NoPathExistsTest) {
+    CDijkstraPathRouter PathRouter;
+    std::vector<CDijkstraPathRouter::TVertexID> Vertices;
+    for (std::size_t Index = 0; Index < 4; Index++) {
+        Vertices.push_back(PathRouter.AddVertex(Index));
+    }
+    // No edges added, so there should be no path between any vertices
+    std::vector<CDijkstraPathRouter::TVertexID> Route;
+    EXPECT_EQ(PathRouter.NoPathExists, PathRouter.FindShortestPath(Vertices[0], Vertices[3], Route));
+    EXPECT_EQ(Route.size(), 0);
+}
