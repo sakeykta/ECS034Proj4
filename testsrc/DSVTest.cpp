@@ -18,7 +18,7 @@ TEST(DSVWriter, SimpleTest){
     std::vector<std::string> StringVector = {"How", "are", "you", "doing?"};
 
     EXPECT_TRUE(DSVWriter.WriteRow(StringVector));
-    EXPECT_EQ(DSVSink->String(),StringUtils::Join(",",StringVector));
+    EXPECT_EQ(DSVSink->String(),(StringUtils::Join(",",StringVector) + "\n"));
 }
 
 TEST(DSVWriter, NewlineTest){
@@ -29,7 +29,7 @@ TEST(DSVWriter, NewlineTest){
     EXPECT_TRUE(DSVWriter.WriteRow(StringVector));
     std::string JoinedRow = StringUtils::Join(",",StringVector);
     EXPECT_TRUE(DSVWriter.WriteRow(StringVector));
-    EXPECT_EQ(DSVSink->String(),StringUtils::Join("\n",{JoinedRow,JoinedRow}));
+    EXPECT_EQ(DSVSink->String(),(StringUtils::Join("\n",{JoinedRow,JoinedRow}) + "\n"));
 }
 
 TEST(DSVWriter, QuotingTest){
@@ -38,7 +38,7 @@ TEST(DSVWriter, QuotingTest){
     std::vector<std::string> StringVector = {"1,000", "My name is \"Bob\"!", "3.3"};
 
     EXPECT_TRUE(DSVWriter.WriteRow(StringVector));
-    EXPECT_EQ(DSVSink->String(),"\"1,000\",\"My name is \"\"Bob\"\"!\",3.3");
+    EXPECT_EQ(DSVSink->String(),"\"1,000\",\"My name is \"\"Bob\"\"!\",3.3\n");
 }
 
 TEST(DSVWriter, QuoteAllTest){
@@ -47,7 +47,7 @@ TEST(DSVWriter, QuoteAllTest){
     std::vector<std::string> StringVector = {"a","b","c","d"};
 
     EXPECT_TRUE(DSVWriter.WriteRow(StringVector));
-    EXPECT_EQ(DSVSink->String(),"\"a\",\"b\",\"c\",\"d\"");
+    EXPECT_EQ(DSVSink->String(),"\"a\",\"b\",\"c\",\"d\"\n");
 }
 
 TEST(DSVReader, EmptyTest){
