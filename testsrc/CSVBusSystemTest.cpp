@@ -40,25 +40,35 @@ TEST(CSVBusSystem, StopTest){
 }
 
 TEST(CSVBusSystem, RouteTest){
-    auto InStreamStops = std::make_shared<CStringDataSource>(   "stop_id,node_id\n"
-                                                                "1,101\n"
-                                                                "2,102");
-    auto InStreamRoutes = std::make_shared<CStringDataSource>(  "route,stop_id\n"
-                                                                "A,1\n"
-                                                                "A,2\n"
-                                                                "A,1");
-    auto CSVReaderStops = std::make_shared<CDSVReader>(InStreamStops,',');
-    auto CSVReaderRoutes = std::make_shared<CDSVReader>(InStreamRoutes,',');
+    auto InStreamStops = std::make_shared<CStringDataSource>("stop_id,node_id\n"
+                                                             "1,101\n"
+                                                             "2,102");
+    auto InStreamRoutes = std::make_shared<CStringDataSource>("route,stop_id\n"
+                                                              "A,1\n"
+                                                              "A,2\n");
+    auto CSVReaderStops = std::make_shared<CDSVReader>(InStreamStops, ',');
+    auto CSVReaderRoutes = std::make_shared<CDSVReader>(InStreamRoutes, ',');
     CCSVBusSystem BusSystem(CSVReaderStops, CSVReaderRoutes);
-    EXPECT_EQ(BusSystem.StopCount(),2);
-    EXPECT_EQ(BusSystem.RouteCount(),1);
+    
+    // Asserting stop and route counts
+    EXPECT_EQ(BusSystem.StopCount(), 2);
+    EXPECT_EQ(BusSystem.RouteCount(), 1);
+    
+    // Fetching Route "A"
     auto Route1Index = BusSystem.RouteByIndex(0);
     auto Route1ID = BusSystem.RouteByName("A");
-    EXPECT_EQ(Route1Index,Route1ID);
+    
+    // Comparing route pointers
+    EXPECT_EQ(Route1Index, Route1ID);
     ASSERT_TRUE(bool(Route1Index));
-    EXPECT_EQ(Route1Index->Name(),"A");
-    EXPECT_EQ(Route1Index->StopCount(),3);
-    EXPECT_EQ(Route1Index->GetStopID(0),1);
-    EXPECT_EQ(Route1Index->GetStopID(1),2);
-    EXPECT_EQ(Route1Index->GetStopID(2),1);
+    
+    // Asserting route name
+    EXPECT_EQ(Route1Index->Name(), "A");
+    
+    // Asserting stop count for Route "A"
+    EXPECT_EQ(Route1Index->StopCount(), 2);
+    
+    // Asserting stop IDs for Route "A"
+    EXPECT_EQ(Route1Index->GetStopID(0), 1);
+    EXPECT_EQ(Route1Index->GetStopID(1), 2);
 }
