@@ -29,7 +29,6 @@ bool CDSVReader::End() const {
     return DImplementation->DDataSource->End();  
 }
 
-// Method to read a row from the data source
 bool CDSVReader::ReadRow(std::vector<std::string> &row) {
     row.clear();  
 
@@ -49,10 +48,16 @@ bool CDSVReader::ReadRow(std::vector<std::string> &row) {
         } else if (ch == DImplementation->DDelimiter && !inQuotedField) {  
             row.push_back(field); 
             field.clear();  
-        } else if (ch == '\"') { 
-            inQuotedField = !inQuotedField; 
+        } else if (ch == '\"') {
+            if (inQuotedField && DImplementation->DDataSource->Peek(ch) && ch == '\"') {
+                // Two consecutive double quotes represent an escaped double quote
+                field += ch;
+                DImplementation->DDataSource->Get(ch); // Consume the peeked character
+            } else {
+                inQuotedField = !inQuotedField; // Toggle inQuotedField flag
+            }
         } else {
-            field += ch; 
+            field += ch; // Append character to the current field
         }
     }
 
