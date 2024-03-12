@@ -1,296 +1,297 @@
-#include <gtest/gtest.h>
-#include "XMLReader.h"
-#include "StringUtils.h"
-#include "StringDataSource.h"
-#include "OpenStreetMap.h"
-#include "CSVBusSystem.h"
-#include "TransportationPlannerConfig.h"
+#include "TransportationPlannerCommandLine.h"
 #include "DijkstraTransportationPlanner.h"
-#include "GeographicUtils.h"
+#include "OpenStreetMap.h"
+#include "DSVReader.h"
+#include "DSVWriter.h"
+#include "StringUtils.h"
+#include <memory>
+#include <vector>
+#include <algorithm>
+#include <unordered_map>
+#include <iostream>
+#include <cmath>
+#include <unordered_set>
+#include <iomanip>
+#include <sstream>
 
-TEST(CSVOSMTransporationPlanner, SimpleTest){
-    auto InStreamOSM = std::make_shared<CStringDataSource>( "<?xml version='1.0' encoding='UTF-8'?>"
-                                                            "<osm version=\"0.6\" generator=\"osmconvert 0.8.5\">"
-                                                            "</osm>");
-    auto InStreamStops = std::make_shared<CStringDataSource>("stop_id,node_id");
-    auto InStreamRoutes = std::make_shared<CStringDataSource>("route,stop_id");
-    auto XMLReader = std::make_shared<CXMLReader>(InStreamOSM);
-    auto CSVReaderStops = std::make_shared<CDSVReader>(InStreamStops,',');
-    auto CSVReaderRoutes = std::make_shared<CDSVReader>(InStreamRoutes,',');
-    auto StreetMap = std::make_shared<COpenStreetMap>(XMLReader);
-    auto BusSystem = std::make_shared<CCSVBusSystem>(CSVReaderStops, CSVReaderRoutes);
-    auto Config = std::make_shared<STransportationPlannerConfig>(StreetMap,BusSystem);
-    CDijkstraTransportationPlanner Planner(Config);
-    std::vector< CTransportationPlanner::TNodeID > ShortestPath;
-    std::vector< CTransportationPlanner::TTripStep > FastestPath;
-    EXPECT_EQ(Planner.FindShortestPath(0,1,ShortestPath),CPathRouter::NoPathExists);
-    EXPECT_EQ(Planner.FindFastestPath(0,1,FastestPath),CPathRouter::NoPathExists);
-}
+struct CTransportationPlannerCommandLine::SImplementation {
+    std::shared_ptr<CDataSource> commandSrc;
+    std::shared_ptr<CDataSink> outSink;
+    std::shared_ptr<CDataSink> errSink;
+    std::shared_ptr<CDataFactory> results;
+    std::shared_ptr<CTransportationPlanner> planner;
 
-TEST(CSVOSMTransporationPlanner, SortedNodeTest){
-    auto InStreamOSM = std::make_shared<CStringDataSource>( "<?xml version='1.0' encoding='UTF-8'?>"
-                                                            "<osm version=\"0.6\" generator=\"osmconvert 0.8.5\">"
-                                                            "<node id=\"4\" lat=\"38.5\" lon=\"-121.7\"/>"
-                                                            "<node id=\"2\" lat=\"38.6\" lon=\"-121.7\"/>"
-                                                            "<node id=\"1\" lat=\"38.6\" lon=\"-121.8\"/>"
-                                                            "<node id=\"3\" lat=\"38.5\" lon=\"-121.8\"/>"
-                                                            "<way id=\"10\">"
-                                                            "<nd ref=\"1\"/>"
-                                                            "<nd ref=\"2\"/>"
-                                                            "<nd ref=\"3\"/>"
-                                                            "<tag k=\"oneway\" v=\"yes\"/>"
-                                                            "</way>"
-                                                            "<way id=\"11\">"
-                                                            "<nd ref=\"3\"/>"
-                                                            "<nd ref=\"4\"/>"
-                                                            "<nd ref=\"1\"/>"
-                                                            "<tag k=\"oneway\" v=\"yes\"/>"
-                                                            "</way>"
-                                                            "</osm>");
-    // 6.9090909 mil 1 -> 2
-    // 5.4 mile  2 -> 3
-    // 6.9090909 mil 3 -> 4
-    // 5.407386 mi 4 -> 1
-    auto InStreamStops = std::make_shared<CStringDataSource>("stop_id,node_id");
-    auto InStreamRoutes = std::make_shared<CStringDataSource>("route,stop_id");
-    auto XMLReader = std::make_shared<CXMLReader>(InStreamOSM);
-    auto CSVReaderStops = std::make_shared<CDSVReader>(InStreamStops,',');
-    auto CSVReaderRoutes = std::make_shared<CDSVReader>(InStreamRoutes,',');
-    auto StreetMap = std::make_shared<COpenStreetMap>(XMLReader);
-    auto BusSystem = std::make_shared<CCSVBusSystem>(CSVReaderStops, CSVReaderRoutes);
-    auto Config = std::make_shared<STransportationPlannerConfig>(StreetMap,BusSystem);
-    CDijkstraTransportationPlanner Planner(Config);
-    EXPECT_EQ(Planner.NodeCount(),4);
-    for(std::size_t Index = 0; Index < Planner.NodeCount(); Index++){
-        auto Node = Planner.SortedNodeByIndex(Index);
-        ASSERT_TRUE(Node);
-        EXPECT_EQ(Node->ID(),Index+1);
+    std::vector<CTransportationPlanner::TTripStep> lastPath;
+    double lastPathTime;
+    std::pair<COpenStreetMap::TNodeID, COpenStreetMap::TNodeID> lastPathSrcDest;
+    
+    SImplementation(std::shared_ptr<CDataSource> c, std::shared_ptr<CDataSink> o, std::shared_ptr<CDataSink> e, std::shared_ptr<CDataFactory> r, std::shared_ptr<CTransportationPlanner> p) {
+        commandSrc = c;
+        outSink = o;
+        errSink = e;
+        results = r;
+        planner = p;
     }
+
+    std::string ConvertCoordinates(std::shared_ptr<COpenStreetMap::SNode> node) const noexcept {
+        std::string direction;
+        
+        // Calculating latitude
+        double lat = node->Location().first;
+        if (lat < 0) {
+            direction = "S";
+            lat *= -1;
+        } else 
+            direction = "N";
+
+        int degrees = std::floor(lat);
+        double temp = (lat - degrees) * 60;
+        int minutes = std::floor(temp);
+        int seconds = std::round((temp - minutes) * 60);
+
+        std::string latDMS = std::to_string(degrees) + "d " + std::to_string(minutes) + "' " + std::to_string(seconds) + "\" " + direction;
+
+        // Calculating longitude
+        double lon = node->Location().second;
+        if (lon < 0) {
+            direction = "W";
+            lon *= -1;
+        } else 
+            direction = "E";
+        
+        degrees = std::floor(lon);
+        temp = (lon - degrees) * 60;
+        minutes = std::floor(temp);
+        seconds = std::round((temp - minutes) * 60);
+        
+        std::string lonDMS = std::to_string(degrees) + "d " + std::to_string(minutes) + "' " + std::to_string(seconds) + "\" " + direction;
+
+        return latDMS + ", " + lonDMS;
+    }
+
+    std::string ConvertHours(double hours) const noexcept {
+        int hr = std::floor(hours);
+        double remaining = (hours - hr) * 60;
+
+        int min = std::floor(remaining);
+        int sec = std::round((remaining - min) * 60);
+
+        std::string retstr;
+        if (hr)
+            retstr += " " + std::to_string(hr) + " hr";
+        
+        if (min)
+            retstr += " " + std::to_string(min) + " min";
+        
+        if (sec)
+            retstr += " " + std::to_string(sec) + " sec";
+
+        return retstr;
+    }
+
+    std::vector<char> ConvertStr(std::string str) const noexcept {
+        return std::vector<char>(str.begin(), str.end());
+    }
+
+    bool ProcessCommands() {
+        
+        while (true) { 
+            outSink->Write(ConvertStr("> "));
+            
+            char c = ' ';
+            std::string commandstr;
+            while (c != '\n') {
+                commandSrc->Get(c);
+                commandstr += c;
+            }
+
+            std::vector<std::string> command = StringUtils::Split(commandstr, " ");
+
+            for (size_t i = 0; i < command.size(); i++) 
+                command[i] = StringUtils::Replace(command[i], "\n", "");
+
+            // HELP
+            if (command[0] == "help") {
+
+                outSink->Write(ConvertStr("------------------------------------------------------------------------\n"));
+                outSink->Write(ConvertStr("help     Display this help menu\n"));
+                outSink->Write(ConvertStr("exit     Exit the program\n"));
+                outSink->Write(ConvertStr("count    Output the number of nodes in the map\n"));
+                outSink->Write(ConvertStr("node     Syntax \"node [0, count)\" \n"));
+                outSink->Write(ConvertStr("         Will output node ID and Lat/Lon for node\n"));
+                outSink->Write(ConvertStr("fastest  Syntax \"fastest start end\" \n"));
+                outSink->Write(ConvertStr("         Calculates the time for fastest path from start to end\n"));
+                outSink->Write(ConvertStr("shortest Syntax \"shortest start end\" \n"));
+                outSink->Write(ConvertStr("         Calculates the distance for the shortest path from start to end\n"));
+                outSink->Write(ConvertStr("save     Saves the last calculated path to file\n"));
+                outSink->Write(ConvertStr("print    Prints the steps for the last calculated path\n"));
+            }
+
+            // EXIT
+            else if (command[0] == "exit") {
+                break;
+            }
+
+            // COUNT
+            else if (command[0] == "count") {
+                std::string numNodes = std::to_string(planner->NodeCount());
+                outSink->Write(ConvertStr(numNodes + " nodes\n"));
+            }
+            
+            // NODE
+            else if (command[0] == "node") {
+                
+                if (command.size() < 2) {
+                    errSink->Write(ConvertStr("Invalid node command, see help.\n"));
+                    continue;
+                }
+                
+                size_t index;
+                try {
+                    index = std::stol(command[1]);
+                } catch(std::invalid_argument) {
+                    errSink->Write(ConvertStr("Invalid node parameter, see help.\n"));
+                    continue;
+                }
+                
+                if (0 <= index < planner->NodeCount()) {
+                    auto node = planner->SortedNodeByIndex(index);
+                    auto id = std::to_string(node->ID());
+                    auto coordinates = ConvertCoordinates(node);
+
+                    outSink->Write(ConvertStr("Node " + std::to_string(index) + ": id = " + id + " is at " + coordinates + "\n"));
+                } else {
+                    errSink->Write(ConvertStr("Invalid node parameter, see help.\n"));
+                }
+            }
+            
+            // FASTEST
+            else if (command[0] == "fastest") {
+                
+                if (command.size() < 3) {
+                    errSink->Write(ConvertStr("Invalid fastest command, see help.\n"));
+                    continue;
+                }
+
+                COpenStreetMap::TNodeID src;
+                COpenStreetMap::TNodeID dest;
+                try {
+                    src = std::stol(command[1]);
+                    dest = std::stol(command[2]);
+                } catch(std::invalid_argument) {
+                    errSink->Write(ConvertStr("Invalid fastest parameter, see help.\n"));
+                    continue;
+                }
+                
+                lastPath.clear();
+                lastPathTime = planner->FindFastestPath(src, dest, lastPath);
+
+                if (lastPathTime == CPathRouter::NoPathExists)
+                    errSink->Write(ConvertStr("Unable to find fastest path between " + std::to_string(src) + " to " + std::to_string(dest) + ".\n"));
+                
+                else {
+                    lastPathSrcDest.first = src;
+                    lastPathSrcDest.second = dest;
+
+                    outSink->Write(ConvertStr("Fastest path takes" + ConvertHours(lastPathTime) + ".\n"));
+                }
+            } 
+            
+            // SHORTEST
+            else if (command[0] == "shortest") {
+
+                if (command.size() < 3) {
+                    errSink->Write(ConvertStr("Invalid shortest command, see help.\n"));
+                    continue;
+                }
+                
+                COpenStreetMap::TNodeID src;
+                COpenStreetMap::TNodeID dest;
+                try {
+                    src = std::stol(command[1]);
+                    dest = std::stol(command[2]);
+                } catch(std::invalid_argument) {
+                    errSink->Write(ConvertStr("Invalid shortest parameter, see help.\n"));
+                    continue;
+                }
+
+                std::vector < COpenStreetMap::TNodeID > path;
+                auto miles = planner->FindShortestPath(src, dest, path);
+
+                if (miles == CPathRouter::NoPathExists)
+                    errSink->Write(ConvertStr("Unable to find shortest path between " + std::to_string(src) + " to " + std::to_string(dest) + ".\n"));
+
+                else {
+                    // https://stackoverflow.com/questions/29200635/convert-float-to-string-with-precision-number-of-decimal-digits-specified
+                    std::stringstream stream;
+                    stream << std::fixed << std::setprecision(1) << miles;
+                    std::string dist = stream.str();
+
+                    outSink->Write(ConvertStr("Shortest path is " + dist + " mi.\n"));
+                }
+                
+            }
+
+            // SAVE
+            else if (command[0] == "save") {
+                
+                if (lastPath.size() == 0) 
+                    errSink->Write(ConvertStr("No valid path to save, see help.\n"));
+                
+                else {
+                    std::string fileName = std::to_string(lastPathSrcDest.first) + "_" + std::to_string(lastPathSrcDest.second) + "_" + std::to_string(lastPathTime) + "hr.csv";
+                    auto saveSink = results->CreateSink(fileName);
+                    saveSink->Write(ConvertStr("mode,node_id\n"));
+
+                    // Loop to write all steps
+                    std::string type, output;
+                    for (size_t i = 0; i < lastPath.size(); i++) {
+                        if (lastPath[i].first == CTransportationPlanner::ETransportationMode::Bus)
+                            type = "Bus";
+                        else if (lastPath[i].first == CTransportationPlanner::ETransportationMode::Bike)
+                            type = "Bike";
+                        else if (lastPath[i].first == CTransportationPlanner::ETransportationMode::Walk)
+                            type = "Walk";
+                        
+                        output += type + "," + std::to_string(lastPath[i].second);
+                        if (i != lastPath.size() - 1)
+                            output += "\n";
+                    }
+                    saveSink->Write(ConvertStr(output));
+                    outSink->Write(ConvertStr("Path saved to <results>/" + fileName + "\n"));
+                }
+            }
+
+            // PRINT
+            else if (command[0] == "print") {
+
+                if (lastPath.size() == 0) 
+                    errSink->Write(ConvertStr("No valid path to print, see help.\n"));
+                
+                else {
+                    std::vector <std::string> desc;
+                    planner->GetPathDescription(lastPath, desc);
+                    
+                    for (size_t i = 0; i < desc.size(); i++) 
+                        outSink->Write(ConvertStr(desc[i] + "\n"));
+                }
+            }
+
+            // INVALID COMMAND
+            else
+                errSink->Write(ConvertStr("Unknown command \"" + command[0] + "\" type help for help.\n"));
+            
+        }
+        return true;
+    }
+};
+
+CTransportationPlannerCommandLine::CTransportationPlannerCommandLine(std::shared_ptr<CDataSource> cmdsrc, std::shared_ptr<CDataSink> outsink, std::shared_ptr<CDataSink> errsink, std::shared_ptr<CDataFactory> results, std::shared_ptr<CTransportationPlanner> planner) {
+    DImplementation = std::make_unique<SImplementation>(cmdsrc, outsink, errsink, results, planner);
 }
 
+CTransportationPlannerCommandLine::~CTransportationPlannerCommandLine() {}
 
-TEST(CSVOSMTransporationPlanner, ShortestPathTest){
-    auto InStreamOSM = std::make_shared<CStringDataSource>( "<?xml version='1.0' encoding='UTF-8'?>"
-                                                            "<osm version=\"0.6\" generator=\"osmconvert 0.8.5\">"
-                                                            "<node id=\"1\" lat=\"38.5\" lon=\"-121.7\"/>"
-                                                            "<node id=\"2\" lat=\"38.6\" lon=\"-121.7\"/>"
-                                                            "<node id=\"3\" lat=\"38.6\" lon=\"-121.8\"/>"
-                                                            "<node id=\"4\" lat=\"38.5\" lon=\"-121.8\"/>"
-                                                            "<way id=\"10\">"
-                                                            "<nd ref=\"1\"/>"
-                                                            "<nd ref=\"2\"/>"
-                                                            "<nd ref=\"3\"/>"
-                                                            "<tag k=\"oneway\" v=\"yes\"/>"
-                                                            "</way>"
-                                                            "<way id=\"11\">"
-                                                            "<nd ref=\"3\"/>"
-                                                            "<nd ref=\"4\"/>"
-                                                            "<nd ref=\"1\"/>"
-                                                            "<tag k=\"oneway\" v=\"yes\"/>"
-                                                            "</way>"
-                                                            "</osm>");
-    // 6.9090909 mil 1 -> 2
-    // 5.4 mile  2 -> 3
-    // 6.9090909 mil 3 -> 4
-    // 5.407386 mi 4 -> 1
-    auto InStreamStops = std::make_shared<CStringDataSource>("stop_id,node_id");
-    auto InStreamRoutes = std::make_shared<CStringDataSource>("route,stop_id");
-    auto XMLReader = std::make_shared<CXMLReader>(InStreamOSM);
-    auto CSVReaderStops = std::make_shared<CDSVReader>(InStreamStops,',');
-    auto CSVReaderRoutes = std::make_shared<CDSVReader>(InStreamRoutes,',');
-    auto StreetMap = std::make_shared<COpenStreetMap>(XMLReader);
-    auto BusSystem = std::make_shared<CCSVBusSystem>(CSVReaderStops, CSVReaderRoutes);
-    auto Config = std::make_shared<STransportationPlannerConfig>(StreetMap,BusSystem);
-    CDijkstraTransportationPlanner Planner(Config);
-    std::vector< CTransportationPlanner::TNodeID > ShortestPath, ExpectedShortestPath = {1,2,3,4};
-    double ExpectedDistance = SGeographicUtils::HaversineDistanceInMiles(std::make_pair(38.5,-121.7),std::make_pair(38.6,-121.7)) + 
-                                SGeographicUtils::HaversineDistanceInMiles(std::make_pair(38.6,-121.7),std::make_pair(38.6,-121.8)) + 
-                                SGeographicUtils::HaversineDistanceInMiles(std::make_pair(38.6,-121.8),std::make_pair(38.5,-121.8));
-    EXPECT_EQ(Planner.FindShortestPath(1,4,ShortestPath),ExpectedDistance);
-    EXPECT_EQ(ShortestPath,ExpectedShortestPath);
-}
-
-TEST(CSVOSMTransporationPlanner, FastestPathTest){
-    auto InStreamOSM = std::make_shared<CStringDataSource>( "<?xml version='1.0' encoding='UTF-8'?>"
-                                                            "<osm version=\"0.6\" generator=\"osmconvert 0.8.5\">"
-                                                            "<node id=\"1\" lat=\"38.5\" lon=\"-121.7\"/>"
-                                                            "<node id=\"2\" lat=\"38.6\" lon=\"-121.7\"/>"
-                                                            "<node id=\"3\" lat=\"38.6\" lon=\"-121.8\"/>"
-                                                            "<node id=\"4\" lat=\"38.5\" lon=\"-121.8\"/>"
-                                                            "<way id=\"10\">"
-                                                            "<nd ref=\"1\"/>"
-                                                            "<nd ref=\"2\"/>"
-                                                            "<nd ref=\"3\"/>"
-                                                            "<nd ref=\"4\"/>"
-                                                            "<tag k=\"maxspeed\" v=\"20 mph\"/>"
-                                                            "</way>"
-                                                            "<way id=\"11\">"
-                                                            "<nd ref=\"4\"/>"
-                                                            "<nd ref=\"1\"/>"
-                                                            "</way>"
-                                                            "</osm>");
-    // 6.9090909 mil 1 <-> 2
-    // 5.4 mile  2 <-> 3
-    // 6.9090909 mil 3 <-> 4
-    // 5.407386 mi 4 <-> 1
-    auto InStreamStops = std::make_shared<CStringDataSource>("stop_id,node_id\n"
-                                                            "101,1\n"
-                                                            "102,2\n"
-                                                            "103,3\n"
-                                                            "104,4"
-                                                            );
-    auto InStreamRoutes = std::make_shared<CStringDataSource>("route,stop_id\n"
-                                                             "A,101\n"
-                                                             "A,102\n"
-                                                             "A,103\n"
-                                                             "A,104\n"
-                                                             "A,101\n"
-                                                             "B,104\n"
-                                                             "B,103\n"
-                                                             "B,102\n"
-                                                             "B,103\n"
-                                                             "B,104");
-    auto XMLReader = std::make_shared<CXMLReader>(InStreamOSM);
-    auto CSVReaderStops = std::make_shared<CDSVReader>(InStreamStops,',');
-    auto CSVReaderRoutes = std::make_shared<CDSVReader>(InStreamRoutes,',');
-    auto StreetMap = std::make_shared<COpenStreetMap>(XMLReader);
-    auto BusSystem = std::make_shared<CCSVBusSystem>(CSVReaderStops, CSVReaderRoutes);
-    auto Config = std::make_shared<STransportationPlannerConfig>(StreetMap,BusSystem);
-    CDijkstraTransportationPlanner Planner(Config);
-    std::vector< CTransportationPlanner::TTripStep > BusFastestPath, ExpectedBusFastestPath = {{CTransportationPlanner::ETransportationMode::Walk,1},
-                                                                                        {CTransportationPlanner::ETransportationMode::Bus,2},
-                                                                                        {CTransportationPlanner::ETransportationMode::Bus,3}};
-    double ExpectedBusDistance = SGeographicUtils::HaversineDistanceInMiles(std::make_pair(38.5,-121.7),std::make_pair(38.6,-121.7)) + 
-                                SGeographicUtils::HaversineDistanceInMiles(std::make_pair(38.6,-121.7),std::make_pair(38.6,-121.8));
-    double ExpectedBusTime = ExpectedBusDistance / 20.0 + (60.0 / 3600.0);
-    EXPECT_EQ(Planner.FindFastestPath(1,3,BusFastestPath),ExpectedBusTime);
-    EXPECT_EQ(BusFastestPath,ExpectedBusFastestPath);
-    std::vector< CTransportationPlanner::TTripStep > BikeFastestPath, ExpectedBikeFastestPath = {{CTransportationPlanner::ETransportationMode::Bike,1},
-                                                                                        {CTransportationPlanner::ETransportationMode::Bike,4}};
-    double ExpectedBikeDistance = SGeographicUtils::HaversineDistanceInMiles(std::make_pair(38.5,-121.7),std::make_pair(38.5,-121.8));
-    double ExpectedBikeTime = ExpectedBikeDistance / 8.0;
-    EXPECT_EQ(Planner.FindFastestPath(1,4,BikeFastestPath),ExpectedBikeTime);
-    EXPECT_EQ(BikeFastestPath,ExpectedBikeFastestPath);
-
-}
-
-TEST(CSVOSMTransporationPlanner, PathDescription){
-    auto InStreamOSM = std::make_shared<CStringDataSource>( "<?xml version='1.0' encoding='UTF-8'?>"
-                                                            "<osm version=\"0.6\" generator=\"osmconvert 0.8.5\">"
-                                                            "<node id=\"1\" lat=\"38.5\" lon=\"-121.7\"/>"
-                                                            "<node id=\"2\" lat=\"38.55\" lon=\"-121.7\"/>"
-                                                            "<node id=\"3\" lat=\"38.6\" lon=\"-121.7\"/>"
-                                                            "<node id=\"4\" lat=\"38.6\" lon=\"-121.78\"/>"
-                                                            "<node id=\"5\" lat=\"38.6\" lon=\"-121.8\"/>"
-                                                            "<node id=\"6\" lat=\"38.55\" lon=\"-121.8\"/>"
-                                                            "<node id=\"7\" lat=\"38.5\" lon=\"-121.8\"/>"
-                                                            "<node id=\"8\" lat=\"38.5\" lon=\"-121.72\"/>"
-                                                            "<node id=\"9\" lat=\"38.45\" lon=\"-121.72\"/>"
-                                                            "<node id=\"10\" lat=\"38.4\" lon=\"-121.72\"/>"
-                                                            "<node id=\"11\" lat=\"38.7\" lon=\"-121.78\"/>"
-                                                            "<way id=\"10\">"
-                                                            "<nd ref=\"1\"/>"
-                                                            "<nd ref=\"2\"/>"
-                                                            "<nd ref=\"3\"/>"
-                                                            "<tag k=\"name\" v=\"A St.\"/>"
-                                                            "</way>"
-                                                            "<way id=\"11\">"
-                                                            "<nd ref=\"3\"/>"
-                                                            "<nd ref=\"4\"/>"
-                                                            "<nd ref=\"5\"/>"
-                                                            "<tag k=\"name\" v=\"2nd St.\"/>"
-                                                            "</way>"
-                                                            "<way id=\"12\">"
-                                                            "<nd ref=\"5\"/>"
-                                                            "<nd ref=\"6\"/>"
-                                                            "<nd ref=\"7\"/>"
-                                                            "<tag k=\"name\" v=\"B St.\"/>"
-                                                            "</way>"
-                                                            "<way id=\"13\">"
-                                                            "<nd ref=\"7\"/>"
-                                                            "<nd ref=\"8\"/>"
-                                                            "<nd ref=\"1\"/>"
-                                                            "<tag k=\"name\" v=\"Main St.\"/>"
-                                                            "</way>"
-                                                            "<way id=\"14\">"
-                                                            "<nd ref=\"8\"/>"
-                                                            "<nd ref=\"9\"/>"
-                                                            "<nd ref=\"10\"/>"
-                                                            "</way>"
-                                                            "<way id=\"15\">"
-                                                            "<nd ref=\"4\"/>"
-                                                            "<nd ref=\"11\"/>"
-                                                            "</way>"
-                                                            "</osm>");
-    // 6.9090909 mil 1 <-> 2
-    // 5.4 mile  2 <-> 3
-    // 6.9090909 mil 3 <-> 4
-    // 5.407386 mi 4 <-> 1
-    auto InStreamStops = std::make_shared<CStringDataSource>("stop_id,node_id\n"
-                                                            "101,1\n"
-                                                            "102,3\n"
-                                                            "103,5\n"
-                                                            "104,7"
-                                                            );
-    auto InStreamRoutes = std::make_shared<CStringDataSource>("route,stop_id\n"
-                                                             "A,101\n"
-                                                             "A,102\n"
-                                                             "A,103\n"
-                                                             "A,104\n"
-                                                             "A,101\n"
-                                                             "B,104\n"
-                                                             "B,103\n"
-                                                             "B,102\n"
-                                                             "B,103\n"
-                                                             "B,104");
-    auto XMLReader = std::make_shared<CXMLReader>(InStreamOSM);
-    auto CSVReaderStops = std::make_shared<CDSVReader>(InStreamStops,',');
-    auto CSVReaderRoutes = std::make_shared<CDSVReader>(InStreamRoutes,',');
-    auto StreetMap = std::make_shared<COpenStreetMap>(XMLReader);
-    auto BusSystem = std::make_shared<CCSVBusSystem>(CSVReaderStops, CSVReaderRoutes);
-    auto Config = std::make_shared<STransportationPlannerConfig>(StreetMap,BusSystem);
-    CDijkstraTransportationPlanner Planner(Config);
-    std::vector< CTransportationPlanner::TTripStep > Path1 = {{CTransportationPlanner::ETransportationMode::Walk,8},
-                                                                {CTransportationPlanner::ETransportationMode::Walk,1},
-                                                                {CTransportationPlanner::ETransportationMode::Bus,3},
-                                                                {CTransportationPlanner::ETransportationMode::Bus,5},
-                                                                {CTransportationPlanner::ETransportationMode::Walk,4},
-                                                                {CTransportationPlanner::ETransportationMode::Walk,11}};
-
-    std::vector<std::string> Description1, ExpectedDescription1 = {"Start at 38d 30' 0\" N, 121d 43' 12\" W",
-                                                                    "Walk E along Main St. for 1.1 mi",
-                                                                    "Take Bus A from stop 101 to stop 103",
-                                                                    "Walk E along 2nd St. for 1.1 mi",
-                                                                    "Walk N toward End for 6.9 mi",
-                                                                    "End at 38d 42' 0\" N, 121d 46' 48\" W"};
-    EXPECT_TRUE(Planner.GetPathDescription(Path1,Description1));
-    EXPECT_EQ(Description1, ExpectedDescription1);
-    std::vector< CTransportationPlanner::TTripStep > Path2 = {{CTransportationPlanner::ETransportationMode::Bike,8},
-                                                                {CTransportationPlanner::ETransportationMode::Bike,7},
-                                                                {CTransportationPlanner::ETransportationMode::Bike,6},
-                                                                {CTransportationPlanner::ETransportationMode::Bike,5},
-                                                                {CTransportationPlanner::ETransportationMode::Bike,4}};
-
-    std::vector<std::string> Description2, ExpectedDescription2 = {"Start at 38d 30' 0\" N, 121d 43' 12\" W",
-                                                                    "Bike W along Main St. for 4.3 mi",
-                                                                    "Bike N along B St. for 6.9 mi",
-                                                                    "Bike E along 2nd St. for 1.1 mi",
-                                                                    "End at 38d 36' 0\" N, 121d 46' 48\" W"};
-    EXPECT_TRUE(Planner.GetPathDescription(Path2,Description2));
-    EXPECT_EQ(Description2, ExpectedDescription2);
-
-    std::vector< CTransportationPlanner::TTripStep > Path3 = {{CTransportationPlanner::ETransportationMode::Bike,10},
-                                                                {CTransportationPlanner::ETransportationMode::Bike,9},
-                                                                {CTransportationPlanner::ETransportationMode::Bike,8},
-                                                                {CTransportationPlanner::ETransportationMode::Bike,7},
-                                                                {CTransportationPlanner::ETransportationMode::Bike,6}};
-
-    std::vector<std::string> Description3, ExpectedDescription3 = {"Start at 38d 23' 60\" N, 121d 43' 12\" W",
-                                                                    "Bike N toward Main St. for 6.9 mi",
-                                                                    "Bike W along Main St. for 4.3 mi",
-                                                                    "Bike N along B St. for 3.5 mi",
-                                                                    "End at 38d 32' 60\" N, 121d 47' 60\" W"};
-    EXPECT_TRUE(Planner.GetPathDescription(Path3,Description3));
-    EXPECT_EQ(Description3, ExpectedDescription3);
-
+bool CTransportationPlannerCommandLine::ProcessCommands() {
+    return DImplementation->ProcessCommands();
 }
