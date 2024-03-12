@@ -15,7 +15,7 @@ LDFLAGS = -L$(GTEST_LIB) -lgtest -lgtest_main -lpthread -lexpat -L$(GMOCK_LIB) -
 
 all: directories runtests
 
-runtests: $(BIN_DIR)/teststrutils $(BIN_DIR)/teststrdatasource $(BIN_DIR)/testfiledatass $(BIN_DIR)/teststrdatasink $(BIN_DIR)/testdsv $(BIN_DIR)/testxml $(BIN_DIR)/testcsvbs $(BIN_DIR)/testosm $(BIN_DIR)/testdpr $(BIN_DIR)/testcsvbsi $(BIN_DIR)/testtpcl $(BIN_DIR)/testtp
+runtests: $(BIN_DIR)/teststrutils $(BIN_DIR)/teststrdatasource $(BIN_DIR)/testfiledatass $(BIN_DIR)/teststrdatasink $(BIN_DIR)/testdsv $(BIN_DIR)/testxml $(BIN_DIR)/testcsvbs $(BIN_DIR)/testosm $(BIN_DIR)/testdpr $(BIN_DIR)/testcsvbsi $(BIN_DIR)/testtpcl $(BIN_DIR)/testtp $(BIN_DIR)/speedtest
 
 	-$(BIN_DIR)/teststrutils
 	-$(BIN_DIR)/teststrdatasource
@@ -30,6 +30,7 @@ runtests: $(BIN_DIR)/teststrutils $(BIN_DIR)/teststrdatasource $(BIN_DIR)/testfi
 	-$(BIN_DIR)/testcsvbsi
 	-$(BIN_DIR)/testtpcl
 	-$(BIN_DIR)/testtp
+	-$(BIN_DIR)/speedtest
 
 
 	
@@ -181,6 +182,25 @@ $(OBJ_DIR)/DijkstraTransportationPlanner.o: $(SRC_DIR)/CDijkstraTransportationPl
 $(OBJ_DIR)/DijkstraTransportationPlannerTest.o: $(TEST_SRC_DIR)/CSVOSMTransportationPlannerTest.cpp $(INC_DIR)/DijkstraTransportationPlanner.h
 	$(CXX) -o $(OBJ_DIR)/DijkstraTransportationPlannerTest.o -c $(CXXFLAGS) $(TEST_SRC_DIR)/CSVOSMTransportationPlannerTest.cpp 
 
+
+$(OBJ_DIR)/StandardDataSource.o: $(SRC_DIR)/StandardDataSource.cpp $(INC_DIR)/StandardDataSource.h
+	$(CXX) -o $(OBJ_DIR)/StandardDataSource.o -c $(CXXFLAGS) $(SRC_DIR)/StandardDataSource.cpp
+
+$(OBJ_DIR)/StandardDataSink.o: $(SRC_DIR)/StandardDataSink.cpp $(INC_DIR)/StandardDataSink.h
+	$(CXX) -o $(OBJ_DIR)/StandardDataSink.o -c $(CXXFLAGS) $(SRC_DIR)/StandardDataSink.cpp
+
+$(OBJ_DIR)/StandardErrorDataSink.o: $(SRC_DIR)/StandardErrorDataSink.cpp $(INC_DIR)/StandardErrorDataSink.h
+	$(CXX) -o $(OBJ_DIR)/StandardErrorDataSink.o -c $(CXXFLAGS) $(SRC_DIR)/StandardErrorDataSink.cpp
+
+
+
+
+
+$(BIN_DIR)/speedtest: $(OBJ_DIR)/speedtest.o $(OBJ_DIR)/StringUtils.o $(OBJ_DIR)/FileDataFactory.o $(OBJ_DIR)/StandardDataSource.o $(OBJ_DIR)/StandardDataSink.o $(OBJ_DIR)/StandardErrorDataSink.o $(OBJ_DIR)/DSVReader.o $(OBJ_DIR)/CSVBusSystem.o $(OBJ_DIR)/XMLReader.o $(OBJ_DIR)/OpenStreetMap.o $(OBJ_DIR)/FileDataSource.o $(OBJ_DIR)/FileDataSink.o $(OBJ_DIR)/BusSystemIndexer.o $(OBJ_DIR)/CDijkstraPathRouter.o $(OBJ_DIR)/GeographicUtils.o $(OBJ_DIR)/DijkstraTransportationPlanner.o
+	$(CXX) $(CXXFLAGS) -o $(BIN_DIR)/speedtest $(OBJ_DIR)/speedtest.o $(OBJ_DIR)/StringUtils.o $(OBJ_DIR)/FileDataFactory.o $(OBJ_DIR)/StandardDataSource.o $(OBJ_DIR)/StandardDataSink.o $(OBJ_DIR)/StandardErrorDataSink.o $(OBJ_DIR)/DSVReader.o $(OBJ_DIR)/CSVBusSystem.o $(OBJ_DIR)/XMLReader.o $(OBJ_DIR)/OpenStreetMap.o $(OBJ_DIR)/FileDataSource.o $(OBJ_DIR)/FileDataSink.o $(OBJ_DIR)/BusSystemIndexer.o $(OBJ_DIR)/CDijkstraPathRouter.o $(OBJ_DIR)/GeographicUtils.o $(OBJ_DIR)/DijkstraTransportationPlanner.o $(LDFLAGS)
+
+$(OBJ_DIR)/speedtest.o: $(SRC_DIR)/speedtest.cpp $(INC_DIR)/TransportationPlannerConfig.h $(INC_DIR)/DijkstraTransportationPlanner.h $(INC_DIR)/OpenStreetMap.h $(INC_DIR)/CSVBusSystem.h $(INC_DIR)/FileDataFactory.h $(INC_DIR)/StandardDataSource.h $(INC_DIR)/StandardDataSink.h $(INC_DIR)/StandardErrorDataSink.h $(INC_DIR)/StringUtils.h
+	$(CXX) $(CXXFLAGS) -o $(OBJ_DIR)/speedtest.o -c $(SRC_DIR)/speedtest.cpp $(LDFLAGS)
 
 
 clean:
