@@ -1,4 +1,4 @@
-/* the original header file
+
 #ifndef OPENSTREETMAP_H
 #define OPENSTREETMAP_H
 
@@ -23,8 +23,8 @@ class COpenStreetMap : public CStreetMap{
 };
 
 #endif
-*/
 
+/*
 #ifndef OPENSTREETMAP_H
 #define OPENSTREETMAP_H
 
@@ -60,3 +60,4 @@ class COpenStreetMap : public CStreetMap{
 };
 
 #endif
+*/
