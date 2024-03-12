@@ -118,37 +118,35 @@ struct CDijkstraTransportationPlanner::SImplementation{
     return Distance;
 }
 
-
-
     double FindFastestPath(TNodeID src, TNodeID dest, std::vector< TTripStep > &path){
-
-            std::vector < CPathRouter::TVertexID > FastestPath1;
-            std::vector < CPathRouter::TVertexID > FastestPath2;
-
-            if((!DStreetMap->NodeByID(src)) || (!DStreetMap->NodeByID(dest))){
-                return CPathRouter::NoPathExists;
+        //search bike path and search walking and bus and take shortest time of the two
+        //for fastest past divide by speed that you move along ie BikeSpeed/WalkSpeed (weights would be in time)
+        //then rely on dijkstras to solve it for you
+        std::vector < CPathRouter::TVertexID > FastestPath1;
+        std::vector < CPathRouter::TVertexID > FastestPath2;
+        //put checks!
+        if((!DStreetMap->NodeByID(src)) || (!DStreetMap->NodeByID(dest))){
+            return CPathRouter::NoPathExists;
+        }
+        auto SourceVertexID = DNodeToVertexID[src];
+        auto DestinationVertexID = DNodeToVertexID[dest];
+        auto BikeFastestSpeed = DFastestPathRouterBike.FindShortestPath(SourceVertexID, DestinationVertexID, FastestPath1);
+        auto WalkBusSpeed = DFastestPathRouterWalkBus.FindShortestPath(SourceVertexID, DestinationVertexID, FastestPath2);
+        if((CPathRouter::NoPathExists ==  BikeFastestSpeed) && (CPathRouter::NoPathExists == WalkBusSpeed)){
+            return CPathRouter::NoPathExists;
+        }
+        path.clear();
+        if((BikeFastestSpeed > WalkBusSpeed) || (CPathRouter::NoPathExists == WalkBusSpeed)){
+            for(auto VertexID : FastestPath1){
+                path.push_back(std::any_cast<TTripStep> (std::make_pair (ETransportationMode::Bike, DNodeToVertexID[VertexID])));
             }
-            auto SourceVertexID = DNodeToVertexID[src];
-            auto DestinationVertexID = DNodeToVertexID[dest];
-            auto BikeFastestSpeed = DFastestPathRouterBike.FindShortestPath(SourceVertexID, DestinationVertexID, FastestPath1);
-            auto WalkBusSpeed = DFastestPathRouterWalkBus.FindShortestPath(SourceVertexID, DestinationVertexID, FastestPath2);
-            if((CPathRouter::NoPathExists ==  BikeFastestSpeed) && (CPathRouter::NoPathExists == WalkBusSpeed)){
-                return CPathRouter::NoPathExists;
-            }
-            path.clear();
-            if((BikeFastestSpeed > WalkBusSpeed) || (CPathRouter::NoPathExists == WalkBusSpeed)){
-                for(auto VertexID : FastestPath1){
-                    path.push_back(std::any_cast<TTripStep> (std::make_pair (ETransportationMode::Bike, DNodeToVertexID[VertexID])));
-                }
-            } else if((BikeFastestSpeed < WalkBusSpeed) || (CPathRouter::NoPathExists == BikeFastestSpeed)){
-                for(auto VertexID : FastestPath2){
-                    path.push_back(std::any_cast<TTripStep> (std::make_pair (ETransportationMode::Walk, DNodeToVertexID[VertexID])));
-                }
+        } else if((BikeFastestSpeed < WalkBusSpeed) || (CPathRouter::NoPathExists == BikeFastestSpeed)){
+            for(auto VertexID : FastestPath2){
+                path.push_back(std::any_cast<TTripStep> (std::make_pair (ETransportationMode::Walk, DNodeToVertexID[VertexID])));
+                //need to differentiate between if the edge is from walking or bus, and then push that to path in TTripStep
             }
         }
-
-
-
+    }
 
     bool GetPathDescription(const std::vector<TTripStep> &path, std::vector<std::string> &desc) const{
         return true; //needs implementation
